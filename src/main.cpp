@@ -430,8 +430,8 @@ void setup(void) {
                         String json = "{\n";
                         json += "\"coordinates\":" + coordinates + ",\n";
                         json += "\"datedime\":" + datedime + ",\n";
-                        json += "data:\n";
-                        sensorsdatafile.print("[");
+                        json += "data:\n]";
+                        sensorsdatafile.print(json);
                         sensorsdatafile.flush();
                         sensorsdatafile.close();
                 }
