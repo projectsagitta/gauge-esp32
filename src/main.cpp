@@ -39,7 +39,6 @@
 #include <pt100rtd.h>
 #include <ADS1115.h>
 #define DBG_OUTPUT_PORT if (debug) Serial
-#define battPin A14
 
 struct sensorvalues {
         float temperature;
@@ -53,6 +52,7 @@ bool measuremode = false;
 long iterate = 0;
 sensorvalues zerovalues {0.0, 0.0, 0, 0};
 String filename = "datafile.sg";
+long unsigned int zeromillis = 0;
 
 ADS1115 adc0(ADS1115_DEFAULT_ADDRESS);
 Adafruit_MAX31865 maxRTD = Adafruit_MAX31865(15, 13, 12, 14);// Use software SPI: CS, DI, DO, CLK
@@ -62,7 +62,7 @@ pt100rtd PT100 = pt100rtd();// init the Pt100 table lookup module
 
 const char* ssid = "SagittaGauge";
 const char* password = "Sagittarius";
-const char* host = "esp32fs";
+const char* host = "sagitta";
 
 WebServer server(80);
 
@@ -145,7 +145,6 @@ bool loadFromSdCard(String path) {
         dataFile.close();
         return true;
 }
-
 bool exists(String path) {
         bool yes = false;
         File file = SD.open(path.c_str(), 'r');
@@ -155,6 +154,111 @@ bool exists(String path) {
         file.close();
         return yes;
 }
+
+
+void printDirectory() {
+        if (!server.hasArg("dir")) {
+                return returnFail("BAD ARGS");
+        }
+        String path = server.arg("dir");
+        if (path != "/" && !SD.exists((char *)path.c_str())) {
+                return returnFail("BAD PATH");
+        }
+        File dir = SD.open((char *)path.c_str());
+        path = String();
+        if (!dir.isDirectory()) {
+                dir.close();
+                return returnFail("NOT DIR");
+        }
+        dir.rewindDirectory();
+        server.setContentLength(CONTENT_LENGTH_UNKNOWN);
+        server.send(200, "text/json", "");
+        WiFiClient client = server.client();
+
+        server.sendContent("[");
+        for (int cnt = 0; true; ++cnt) {
+                File entry = dir.openNextFile();
+                if (!entry) {
+                        break;
+                }
+
+                String output;
+                if (cnt > 0) {
+                        output = ',';
+                }
+
+                output += "{\"type\":\"";
+                output += (entry.isDirectory()) ? "dir" : "file";
+                output += "\",\"name\":\"";
+                output += entry.name();
+                output += "\"";
+                output += "}";
+                server.sendContent(output);
+                entry.close();
+        }
+        server.sendContent("]");
+        dir.close();
+}
+int checkFault(void){
+        // Check and print any faults
+        uint8_t fault = maxRTD.readFault();
+        if (fault)
+        {
+                DBG_OUTPUT_PORT.print("Fault 0x"); DBG_OUTPUT_PORT.println(fault, HEX);
+                if (fault & MAX31865_FAULT_HIGHTHRESH) {DBG_OUTPUT_PORT.println("RTD High Threshold");}
+                if (fault & MAX31865_FAULT_LOWTHRESH) {DBG_OUTPUT_PORT.println("RTD Low Threshold");}
+                if (fault & MAX31865_FAULT_REFINLOW) {DBG_OUTPUT_PORT.println("REFIN- > 0.85 x Bias");}
+                if (fault & MAX31865_FAULT_REFINHIGH) {DBG_OUTPUT_PORT.println("REFIN- < 0.85 x Bias - FORCE- open");}
+                if (fault & MAX31865_FAULT_RTDINLOW) {DBG_OUTPUT_PORT.println("RTDIN- < 0.85 x Bias - FORCE- open");}
+                if (fault & MAX31865_FAULT_OVUV) {DBG_OUTPUT_PORT.println("Under/Over voltage");}
+                maxRTD.clearFault();
+        }
+        return fault;
+}
+String getJsonFromSens(sensorvalues sensorsdata){
+        String json = "{";
+        json += "\"station\":" + String(sensorsdata.station);
+        json += ", \"millis\":" + String(sensorsdata.millis);
+        //json += "\"heap\":" + String(ESP.getFreeHeap());
+        json += ", \"temperature\":" + String(sensorsdata.temperature);
+        json += ", \"pressure\":" + String(sensorsdata.pressure);
+        json += "}";
+        return json;
+}
+int getSensorsData(sensorvalues *sensorsdata){
+        uint16_t rtd, ohmsx100;
+        uint32_t dummy;
+        float temperature;
+        float pressure;
+        rtd = maxRTD.readRTD();
+        dummy = ((uint32_t)(rtd << 1)) * 100 * ((uint32_t) floor(RREF));
+        dummy >>= 16;
+        ohmsx100 = (uint16_t) (dummy & 0xFFFF);
+        // or use exact ohms floating point value.
+        //ohms = (float)(ohmsx100 / 100) + ((float)(ohmsx100 % 100) / 100.0);
+        //DBG_OUTPUT_PORT.print("ohms: "); DBG_OUTPUT_PORT.print(ohms,2);
+        temperature = PT100.celsius(ohmsx100); // NoobNote: LUT== LookUp Table
+        //DBG_OUTPUT_PORT.print("\t| t = "); DBG_OUTPUT_PORT.print(temperature,3); DBG_OUTPUT_PORT.println(" C");
+        checkFault();
+        // Get the number of counts of the accumulator
+        //DBG_OUTPUT_PORT.print("cnts: ");
+        // The below method sets the mux and gets a reading.
+        adc0.setGain(ADS1115_PGA_0P256);
+        int sensorOneCounts=adc0.getConversionP0N1(); // counts up to 16-bits
+        pressure = (float)sensorOneCounts/32.768;
+        //DBG_OUTPUT_PORT.print(sensorOneCounts);
+        // To turn the counts into a voltage, we can use
+        //DBG_OUTPUT_PORT.print("\t| p = ");
+        //DBG_OUTPUT_PORT.print(pressure); DBG_OUTPUT_PORT.println(" kPa");
+        //DBG_OUTPUT_PORT.print("\t| ms = ");
+        //DBG_OUTPUT_PORT.print(millis());
+        //DBG_OUTPUT_PORT.println("\n-------------------------------");
+        sensorsdata->millis = millis();
+        sensorsdata->temperature = temperature;
+        sensorsdata->pressure = pressure;
+        return (0);
+}
+
 void handleFileUpload() {
         if (server.uri() != "/edit") {
                 return;
@@ -270,111 +374,33 @@ void handleNotFound() {
         server.send(404, "text/plain", message);
         DBG_OUTPUT_PORT.print(message);
 }
-void printDirectory() {
-        if (!server.hasArg("dir")) {
-                return returnFail("BAD ARGS");
+void handleZero(){
+        sensorvalues sens;
+        //calibrate sensors!
+        sens.pressure = 0;
+        sens.temperature = 0;
+        float zeropressure = 0;
+        float zerotemp = 0;
+        for (int i = 0; i < 20; i++) {
+                getSensorsData(&sens);
+                zeropressure  +=  sens.pressure;
+                zerotemp  +=  sens.temperature;
         }
-        String path = server.arg("dir");
-        if (path != "/" && !SD.exists((char *)path.c_str())) {
-                return returnFail("BAD PATH");
-        }
-        File dir = SD.open((char *)path.c_str());
-        path = String();
-        if (!dir.isDirectory()) {
-                dir.close();
-                return returnFail("NOT DIR");
-        }
-        dir.rewindDirectory();
-        server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-        server.send(200, "text/json", "");
-        WiFiClient client = server.client();
-
-        server.sendContent("[");
-        for (int cnt = 0; true; ++cnt) {
-                File entry = dir.openNextFile();
-                if (!entry) {
-                        break;
-                }
-
-                String output;
-                if (cnt > 0) {
-                        output = ',';
-                }
-
-                output += "{\"type\":\"";
-                output += (entry.isDirectory()) ? "dir" : "file";
-                output += "\",\"name\":\"";
-                output += entry.name();
-                output += "\"";
-                output += "}";
-                server.sendContent(output);
-                entry.close();
-        }
-        server.sendContent("]");
-        dir.close();
-}
-int checkFault(void){
-        // Check and print any faults
-        uint8_t fault = maxRTD.readFault();
-        if (fault)
-        {
-                DBG_OUTPUT_PORT.print("Fault 0x"); DBG_OUTPUT_PORT.println(fault, HEX);
-                if (fault & MAX31865_FAULT_HIGHTHRESH) {DBG_OUTPUT_PORT.println("RTD High Threshold");}
-                if (fault & MAX31865_FAULT_LOWTHRESH) {DBG_OUTPUT_PORT.println("RTD Low Threshold");}
-                if (fault & MAX31865_FAULT_REFINLOW) {DBG_OUTPUT_PORT.println("REFIN- > 0.85 x Bias");}
-                if (fault & MAX31865_FAULT_REFINHIGH) {DBG_OUTPUT_PORT.println("REFIN- < 0.85 x Bias - FORCE- open");}
-                if (fault & MAX31865_FAULT_RTDINLOW) {DBG_OUTPUT_PORT.println("RTDIN- < 0.85 x Bias - FORCE- open");}
-                if (fault & MAX31865_FAULT_OVUV) {DBG_OUTPUT_PORT.println("Under/Over voltage");}
-                maxRTD.clearFault();
-        }
-        return fault;
-}
-String getJsonFromSens(sensorvalues sensorsdata){
-        String json = "{";
-        json += "\"station\":" + String(sensorsdata.station);
-        json += ", \"millis\":" + String(sensorsdata.millis);
-        //json += "\"heap\":" + String(ESP.getFreeHeap());
-        json += ", \"temperature\":" + String(sensorsdata.temperature);
-        json += ", \"pressure\":" + String(sensorsdata.pressure);
-        json += "}";
-        return json;
-}
-int getSensorsData(sensorvalues *sensorsdata){
-        uint16_t rtd, ohmsx100;
-        uint32_t dummy;
-        float temperature;
-        float pressure;
-        rtd = maxRTD.readRTD();
-        dummy = ((uint32_t)(rtd << 1)) * 100 * ((uint32_t) floor(RREF));
-        dummy >>= 16;
-        ohmsx100 = (uint16_t) (dummy & 0xFFFF);
-        // or use exact ohms floating point value.
-        //ohms = (float)(ohmsx100 / 100) + ((float)(ohmsx100 % 100) / 100.0);
-        //DBG_OUTPUT_PORT.print("ohms: "); DBG_OUTPUT_PORT.print(ohms,2);
-        temperature = PT100.celsius(ohmsx100); // NoobNote: LUT== LookUp Table
-        //DBG_OUTPUT_PORT.print("\t| t = "); DBG_OUTPUT_PORT.print(temperature,3); DBG_OUTPUT_PORT.println(" C");
-        checkFault();
-        // Get the number of counts of the accumulator
-        //DBG_OUTPUT_PORT.print("cnts: ");
-        // The below method sets the mux and gets a reading.
-        adc0.setGain(ADS1115_PGA_0P256);
-        int sensorOneCounts=adc0.getConversionP0N1(); // counts up to 16-bits
-        pressure = (float)sensorOneCounts/32.768;
-        //DBG_OUTPUT_PORT.print(sensorOneCounts);
-        // To turn the counts into a voltage, we can use
-        //DBG_OUTPUT_PORT.print("\t| p = ");
-        //DBG_OUTPUT_PORT.print(pressure); DBG_OUTPUT_PORT.println(" kPa");
-        //DBG_OUTPUT_PORT.print("\t| ms = ");
-        //DBG_OUTPUT_PORT.print(millis());
-        //DBG_OUTPUT_PORT.println("\n-------------------------------");
-        sensorsdata->millis = millis();
-        sensorsdata->temperature = temperature;
-        sensorsdata->pressure = pressure;
-        return (0);
+        zeropressure = zeropressure / 20;
+        zerotemp = zerotemp / 20;
+        zerovalues.pressure = zeropressure;
+        zerovalues.millis = millis();
+        zerovalues.station = 0;
+        sens.pressure = zeropressure;
+        sens.temperature = zerotemp;
+        sens.station = 0;
+        iterate = 0;
+        String jsonstring = getJsonFromSens(sens)+"\n";
+        DBG_OUTPUT_PORT.print(jsonstring.c_str());
+        server.send(300, "text/json", jsonstring);
 }
 
 void setup(void) {
-        pinMode(battPin, INPUT);
         DBG_OUTPUT_PORT.begin(115200);
         DBG_OUTPUT_PORT.print("\n");
         DBG_OUTPUT_PORT.setDebugOutput(true);
@@ -418,6 +444,10 @@ void setup(void) {
         server.on("/measuremode_on", HTTP_POST, []() {
                 String coordinates = server.arg("coordinates");
                 String datetime = server.arg("datetime");
+                if (server.hasArg("zero")) {
+                        handleZero();
+                }
+
                 DBG_OUTPUT_PORT.println("\nServer args: " + String(server.args()) + " " + server.arg("coordinates") + "  " + server.arg("datetime"));
                 deleteRecursive(filename);
                 measuremode = true;
@@ -454,29 +484,32 @@ void setup(void) {
                 returnOK();
         });
         server.on("/zero", HTTP_GET, []() {
-                sensorvalues sens;
-                //calibrate sensors!
-                sens.pressure = 0;
-                sens.temperature = 0;
-                float zeropressure = 0;
-                float zerotemp = 0;
-                for (int i = 0; i < 20; i++) {
+                handleZero();
+                returnOK();
+                /*
+                   sensorvalues sens;
+                   //calibrate sensors!
+                   sens.pressure = 0;
+                   sens.temperature = 0;
+                   float zeropressure = 0;
+                   float zerotemp = 0;
+                   for (int i = 0; i < 20; i++) {
                         getSensorsData(&sens);
                         zeropressure  +=  sens.pressure;
                         zerotemp  +=  sens.temperature;
-                }
-                zeropressure = zeropressure / 20;
-                zerotemp = zerotemp / 20;
-                zerovalues.pressure = zeropressure;
-                zerovalues.millis = millis();
-                zerovalues.station = 0;
-                sens.pressure = zeropressure;
-                sens.temperature = zerotemp;
-                sens.station = 0;
-                iterate = 0;
-                String jsonstring = getJsonFromSens(sens)+"\n";
-                DBG_OUTPUT_PORT.print(jsonstring.c_str());
-                server.send(300, "text/json", jsonstring);
+                   }
+                   zeropressure = zeropressure / 20;
+                   zerotemp = zerotemp / 20;
+                   zerovalues.pressure = zeropressure;
+                   zerovalues.millis = millis();
+                   zerovalues.station = 0;
+                   sens.pressure = zeropressure;
+                   sens.temperature = zerotemp;
+                   sens.station = 0;
+                   iterate = 0;
+                   String jsonstring = getJsonFromSens(sens)+"\n";
+                   DBG_OUTPUT_PORT.print(jsonstring.c_str());
+                   server.send(300, "text/json", jsonstring);*/
         });
         server.on("/debug_on", HTTP_POST, []() {
                 debug = true;
@@ -500,8 +533,6 @@ void setup(void) {
 void loop(void) {
         server.handleClient();
         delay(100);
-        int bat = analogRead(battPin);
-        DBG_OUTPUT_PORT.println("BATTERY VOLTAGE:"+String(bat));
         if (measuremode) {
                 File sensorsdatafile;
                 sensorsdatafile = SD.open(filename.c_str(), FILE_WRITE);//"test.txt", FILE_WRITE);//
@@ -509,11 +540,14 @@ void loop(void) {
                         sensorvalues sensorval;
                         sensorval.station = iterate;
                         getSensorsData(&sensorval);
-                        sensorval.pressure = sensorval.pressure - zerovalues.pressure;
                         String jsonstring = "";
                         if (sensorval.station != 0) {
                                 jsonstring += ",";
+                        } else {
+                          zeromillis = millis();
                         }
+                        sensorval.millis = sensorval.millis - zeromillis;
+                        sensorval.pressure = sensorval.pressure - zerovalues.pressure;
                         jsonstring += "\n";
                         jsonstring += getJsonFromSens(sensorval);
                         sensorsdatafile.print(jsonstring);//.c_str());//, jsonstring.length());
