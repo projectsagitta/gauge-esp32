@@ -70,35 +70,35 @@ static bool hasSD = false;
 File uploadFile;
 
 void initPerytherials(){
-  Wire.begin();
-  DBG_OUTPUT_PORT.println("MAX31865 and ADS1115 multimeasuring test");
-  DBG_OUTPUT_PORT.println("Initializing MAX31865...");
-  maxRTD.begin(MAX31865_4WIRE); // set to 2WIRE or 4WIRE as necessary
-  DBG_OUTPUT_PORT.println("Initializing ADS1115...");
-  adc0.initialize(); // initialize ADS1115 16 bit A/D chip
-  DBG_OUTPUT_PORT.println("Testing ADS1115 connections...");
-  DBG_OUTPUT_PORT.println(adc0.testConnection() ? "ADS1115 connection successful" : "ADS1115 connection failed");
-  adc0.showConfigRegister();
-  adc0.setRate(ADS1115_RATE_860);
-  adc0.setMode(ADS1115_MODE_CONTINUOUS);
+        Wire.begin();
+        DBG_OUTPUT_PORT.println("MAX31865 and ADS1115 multimeasuring test");
+        DBG_OUTPUT_PORT.println("Initializing MAX31865...");
+        maxRTD.begin(MAX31865_4WIRE); // set to 2WIRE or 4WIRE as necessary
+        DBG_OUTPUT_PORT.println("Initializing ADS1115...");
+        adc0.initialize(); // initialize ADS1115 16 bit A/D chip
+        DBG_OUTPUT_PORT.println("Testing ADS1115 connections...");
+        DBG_OUTPUT_PORT.println(adc0.testConnection() ? "ADS1115 connection successful" : "ADS1115 connection failed");
+        adc0.showConfigRegister();
+        adc0.setRate(ADS1115_RATE_860);
+        adc0.setMode(ADS1115_MODE_CONTINUOUS);
 }
 void initWiFi(){
-  //WIFI INIT
-  DBG_OUTPUT_PORT.printf("Connecting to %s\n", ssid);
-  WiFi.softAP(ssid, password);
+        //WIFI INIT
+        DBG_OUTPUT_PORT.printf("Connecting to %s\n", ssid);
+        WiFi.softAP(ssid, password);
 
-  DBG_OUTPUT_PORT.println("Wi-Fi access point ready");
-  DBG_OUTPUT_PORT.println();
-  DBG_OUTPUT_PORT.print("IP address: ");
-  DBG_OUTPUT_PORT.println(WiFi.softAPIP());
-  DBG_OUTPUT_PORT.println();
-  if (MDNS.begin(host)) {
-          MDNS.addService("http", "tcp", 80);
-          DBG_OUTPUT_PORT.println("MDNS responder started");
-          DBG_OUTPUT_PORT.print("You can now connect to http://");
-          DBG_OUTPUT_PORT.print(host);
-          DBG_OUTPUT_PORT.println(".local");
-  }
+        DBG_OUTPUT_PORT.println("Wi-Fi access point ready");
+        DBG_OUTPUT_PORT.println();
+        DBG_OUTPUT_PORT.print("IP address: ");
+        DBG_OUTPUT_PORT.println(WiFi.softAPIP());
+        DBG_OUTPUT_PORT.println();
+        if (MDNS.begin(host)) {
+                MDNS.addService("http", "tcp", 80);
+                DBG_OUTPUT_PORT.println("MDNS responder started");
+                DBG_OUTPUT_PORT.print("You can now connect to http://");
+                DBG_OUTPUT_PORT.print(host);
+                DBG_OUTPUT_PORT.println(".local");
+        }
 }
 
 void returnOK() {
@@ -385,7 +385,7 @@ void handleFileRead() {
         }
 }
 void handleNotFound() {
-        if (hasSD) {// && loadFromSdCard(server.uri())) {
+        if (hasSD && loadFromSdCard(server.uri())) {
                 return;
         }
         String message = "SDCARD Not Detected\n\n";
