@@ -1,7 +1,8 @@
 /*
    Sagitta gauge ESP32 - cheap (C)TD sonde with WiFi WebServer.
-   
-   Thanks Hristo Gochkov for WebServer example.
+   (c) 2018 Sagitta team.
+
+   Thanks Hristo Gochkov for WebServer lib and example.
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Lesser General Public
@@ -46,8 +47,8 @@ long unsigned int zeromillis = 0;
 
 ADS1115 adc0(ADS1115_DEFAULT_ADDRESS);
 Adafruit_MAX31865 maxRTD = Adafruit_MAX31865(15, 13, 12, 14);// Use software SPI: CS, DI, DO, CLK
-#define RREF 430.0// The value of the Rref resistor. Use 430.0!
-#define C2F(c) ((9 * c / 5) + 32)// Like, duh.
+#define RREF 430.0// The value of the Rref resistor. With adafruit-like module use 430.0!
+#define C2F(c) ((9 * c / 5) + 32)// Magic, freaking magic!
 pt100rtd PT100 = pt100rtd();// init the Pt100 table lookup module
 
 const char* ssid = "SagittaGauge";
@@ -513,6 +514,7 @@ void measuring(){
         }
 }
 
+//****************************************************************//
 void setup(void) {
         DBG_OUTPUT_PORT.begin(115200);
         DBG_OUTPUT_PORT.print("\n");
