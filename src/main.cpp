@@ -69,6 +69,37 @@ WebServer server(80);
 static bool hasSD = false;
 File uploadFile;
 
+void initPerytherials(){
+  Wire.begin();
+  DBG_OUTPUT_PORT.println("MAX31865 and ADS1115 multimeasuring test");
+  DBG_OUTPUT_PORT.println("Initializing MAX31865...");
+  maxRTD.begin(MAX31865_4WIRE); // set to 2WIRE or 4WIRE as necessary
+  DBG_OUTPUT_PORT.println("Initializing ADS1115...");
+  adc0.initialize(); // initialize ADS1115 16 bit A/D chip
+  DBG_OUTPUT_PORT.println("Testing ADS1115 connections...");
+  DBG_OUTPUT_PORT.println(adc0.testConnection() ? "ADS1115 connection successful" : "ADS1115 connection failed");
+  adc0.showConfigRegister();
+  adc0.setRate(ADS1115_RATE_860);
+  adc0.setMode(ADS1115_MODE_CONTINUOUS);
+}
+void initWiFi(){
+  //WIFI INIT
+  DBG_OUTPUT_PORT.printf("Connecting to %s\n", ssid);
+  WiFi.softAP(ssid, password);
+
+  DBG_OUTPUT_PORT.println("Wi-Fi access point ready");
+  DBG_OUTPUT_PORT.println();
+  DBG_OUTPUT_PORT.print("IP address: ");
+  DBG_OUTPUT_PORT.println(WiFi.softAPIP());
+  DBG_OUTPUT_PORT.println();
+  if (MDNS.begin(host)) {
+          MDNS.addService("http", "tcp", 80);
+          DBG_OUTPUT_PORT.println("MDNS responder started");
+          DBG_OUTPUT_PORT.print("You can now connect to http://");
+          DBG_OUTPUT_PORT.print(host);
+          DBG_OUTPUT_PORT.println(".local");
+  }
+}
 
 void returnOK() {
         server.send(200, "text/plain", "");
@@ -77,7 +108,6 @@ void returnFail(String msg) {
         server.send(500, "text/plain", msg + "\r\n");
 }
 
-//format bytes and illustrate filesize
 String formatBytes(size_t bytes) {
         if (bytes < 1024) {
                 return String(bytes) + "B";
@@ -154,8 +184,6 @@ bool exists(String path) {
         file.close();
         return yes;
 }
-
-
 void printDirectory() {
         if (!server.hasArg("dir")) {
                 return returnFail("BAD ARGS");
@@ -399,40 +427,83 @@ void handleZero(){
         DBG_OUTPUT_PORT.print(jsonstring.c_str());
         server.send(300, "text/json", jsonstring);
 }
+void handleMeasureModeOn(){
+        String coordinates = server.arg("coordinates");
+        String datetime = server.arg("datetime");
+        if (server.hasArg("zero")) {
+                handleZero();
+        }
+
+        DBG_OUTPUT_PORT.println("\nServer args: " + String(server.args()) + " " + server.arg("coordinates") + "  " + server.arg("datetime"));
+        deleteRecursive(filename);
+        measuremode = true;
+        File sensorsdatafile;
+        sensorsdatafile = SD.open(filename.c_str(), FILE_WRITE);
+        //if (!server.hasArg("coordinates")||!server.hasArg("datetime")) {
+        //        return returnFail("BAD ARGS");
+        //}
+        if (sensorsdatafile) {
+                String json = "{\n";
+                json += "\"coordinates\":\"" + coordinates + "\",\n";
+                json += "\"datetime\":\"" + datetime + "\",\n";
+                json += "\"data\":\n[";
+                sensorsdatafile.print(json);
+                DBG_OUTPUT_PORT.println(json);
+                sensorsdatafile.flush();
+                sensorsdatafile.close();
+        }
+        DBG_OUTPUT_PORT.print("\n\nnew measurement: ");
+        DBG_OUTPUT_PORT.println(filename);
+}
+void handleMeasureModeOff(){
+        measuremode = false;
+        File sensorsdatafile;
+        sensorsdatafile = SD.open(filename.c_str(), FILE_WRITE);//"test.txt", FILE_WRITE);//
+        if (sensorsdatafile) {
+                sensorsdatafile.print("\n]\n}\n");
+                sensorsdatafile.flush();
+                sensorsdatafile.close();
+        }
+        DBG_OUTPUT_PORT.print("\n\nend of measurement: ");
+        DBG_OUTPUT_PORT.println(filename);
+}
+void measuring(){
+        File sensorsdatafile;
+        sensorsdatafile = SD.open(filename.c_str(), FILE_WRITE);//"test.txt", FILE_WRITE);//
+        if (sensorsdatafile) {
+                sensorvalues sensorval;
+                sensorval.station = iterate;
+                getSensorsData(&sensorval);
+                String jsonstring = "";
+                if (sensorval.station != 0) {
+                        jsonstring += ",";
+                } else {
+                        zeromillis = millis();
+                }
+                sensorval.millis = sensorval.millis - zeromillis;
+                sensorval.pressure = sensorval.pressure - zerovalues.pressure;
+                jsonstring += "\n";
+                jsonstring += getJsonFromSens(sensorval);
+                sensorsdatafile.print(jsonstring);//.c_str());//, jsonstring.length());
+                DBG_OUTPUT_PORT.print(jsonstring);//.c_str());
+                sensorsdatafile.flush();
+                sensorsdatafile.close();
+                iterate++;
+        }
+        else {
+                DBG_OUTPUT_PORT.println("cannot write file!");
+                DBG_OUTPUT_PORT.println (filename);
+        }
+}
 
 void setup(void) {
         DBG_OUTPUT_PORT.begin(115200);
         DBG_OUTPUT_PORT.print("\n");
         DBG_OUTPUT_PORT.setDebugOutput(true);
 
-        Wire.begin();
-        DBG_OUTPUT_PORT.println("MAX31865 and ADS1115 multimeasuring test");
-        DBG_OUTPUT_PORT.println("Initializing MAX31865...");
-        maxRTD.begin(MAX31865_4WIRE); // set to 2WIRE or 4WIRE as necessary
-        DBG_OUTPUT_PORT.println("Initializing ADS1115...");
-        adc0.initialize(); // initialize ADS1115 16 bit A/D chip
-        DBG_OUTPUT_PORT.println("Testing ADS1115 connections...");
-        DBG_OUTPUT_PORT.println(adc0.testConnection() ? "ADS1115 connection successful" : "ADS1115 connection failed");
-        adc0.showConfigRegister();
-        adc0.setRate(ADS1115_RATE_860);
-        adc0.setMode(ADS1115_MODE_CONTINUOUS);
+        initPerytherials();
+        initWiFi();
 
-        //WIFI INIT
-        DBG_OUTPUT_PORT.printf("Connecting to %s\n", ssid);
-        WiFi.softAP(ssid, password);
-
-        DBG_OUTPUT_PORT.println("Wi-Fi access point ready");
-        DBG_OUTPUT_PORT.println();
-        DBG_OUTPUT_PORT.print("IP address: ");
-        DBG_OUTPUT_PORT.println(WiFi.softAPIP());
-        DBG_OUTPUT_PORT.println();
-        if (MDNS.begin(host)) {
-                MDNS.addService("http", "tcp", 80);
-                DBG_OUTPUT_PORT.println("MDNS responder started");
-                DBG_OUTPUT_PORT.print("You can now connect to http://");
-                DBG_OUTPUT_PORT.print(host);
-                DBG_OUTPUT_PORT.println(".local");
-        }
         server.on("/list", HTTP_GET, printDirectory);
         server.on("/edit", HTTP_DELETE, handleDelete);
         server.on("/edit", HTTP_PUT, handleCreate);
@@ -442,74 +513,16 @@ void setup(void) {
         server.onNotFound(handleNotFound);
         server.on("/get", HTTP_GET, handleFileRead);
         server.on("/measuremode_on", HTTP_POST, []() {
-                String coordinates = server.arg("coordinates");
-                String datetime = server.arg("datetime");
-                if (server.hasArg("zero")) {
-                        handleZero();
-                }
-
-                DBG_OUTPUT_PORT.println("\nServer args: " + String(server.args()) + " " + server.arg("coordinates") + "  " + server.arg("datetime"));
-                deleteRecursive(filename);
-                measuremode = true;
-                File sensorsdatafile;
-                sensorsdatafile = SD.open(filename.c_str(), FILE_WRITE);
-                //if (!server.hasArg("coordinates")||!server.hasArg("datetime")) {
-                //        return returnFail("BAD ARGS");
-                //}
-                if (sensorsdatafile) {
-                        String json = "{\n";
-                        json += "\"coordinates\":\"" + coordinates + "\",\n";
-                        json += "\"datetime\":\"" + datetime + "\",\n";
-                        json += "\"data\":\n[";
-                        sensorsdatafile.print(json);
-                        DBG_OUTPUT_PORT.println(json);
-                        sensorsdatafile.flush();
-                        sensorsdatafile.close();
-                }
-                DBG_OUTPUT_PORT.print("\n\nnew measurement: ");
-                DBG_OUTPUT_PORT.println(filename);
+                handleMeasureModeOn();
                 returnOK();
         });
         server.on("/measuremode_off", HTTP_POST, []() {
-                measuremode = false;
-                File sensorsdatafile;
-                sensorsdatafile = SD.open(filename.c_str(), FILE_WRITE);//"test.txt", FILE_WRITE);//
-                if (sensorsdatafile) {
-                        sensorsdatafile.print("\n]\n}\n");
-                        sensorsdatafile.flush();
-                        sensorsdatafile.close();
-                }
-                DBG_OUTPUT_PORT.print("\n\nend of measurement: ");
-                DBG_OUTPUT_PORT.println(filename);
+                handleMeasureModeOff();
                 returnOK();
         });
         server.on("/zero", HTTP_GET, []() {
                 handleZero();
                 returnOK();
-                /*
-                   sensorvalues sens;
-                   //calibrate sensors!
-                   sens.pressure = 0;
-                   sens.temperature = 0;
-                   float zeropressure = 0;
-                   float zerotemp = 0;
-                   for (int i = 0; i < 20; i++) {
-                        getSensorsData(&sens);
-                        zeropressure  +=  sens.pressure;
-                        zerotemp  +=  sens.temperature;
-                   }
-                   zeropressure = zeropressure / 20;
-                   zerotemp = zerotemp / 20;
-                   zerovalues.pressure = zeropressure;
-                   zerovalues.millis = millis();
-                   zerovalues.station = 0;
-                   sens.pressure = zeropressure;
-                   sens.temperature = zerotemp;
-                   sens.station = 0;
-                   iterate = 0;
-                   String jsonstring = getJsonFromSens(sens)+"\n";
-                   DBG_OUTPUT_PORT.print(jsonstring.c_str());
-                   server.send(300, "text/json", jsonstring);*/
         });
         server.on("/debug_on", HTTP_POST, []() {
                 debug = true;
@@ -534,31 +547,6 @@ void loop(void) {
         server.handleClient();
         delay(100);
         if (measuremode) {
-                File sensorsdatafile;
-                sensorsdatafile = SD.open(filename.c_str(), FILE_WRITE);//"test.txt", FILE_WRITE);//
-                if (sensorsdatafile) {
-                        sensorvalues sensorval;
-                        sensorval.station = iterate;
-                        getSensorsData(&sensorval);
-                        String jsonstring = "";
-                        if (sensorval.station != 0) {
-                                jsonstring += ",";
-                        } else {
-                          zeromillis = millis();
-                        }
-                        sensorval.millis = sensorval.millis - zeromillis;
-                        sensorval.pressure = sensorval.pressure - zerovalues.pressure;
-                        jsonstring += "\n";
-                        jsonstring += getJsonFromSens(sensorval);
-                        sensorsdatafile.print(jsonstring);//.c_str());//, jsonstring.length());
-                        DBG_OUTPUT_PORT.print(jsonstring);//.c_str());
-                        sensorsdatafile.flush();
-                        sensorsdatafile.close();
-                        iterate++;
-                }
-                else {
-                        DBG_OUTPUT_PORT.println("cannot write file!");
-                        DBG_OUTPUT_PORT.println (filename);
-                }
+                measuring();
         }
 }
