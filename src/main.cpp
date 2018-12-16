@@ -1,8 +1,7 @@
 /*
-   SDWebServer - Example WebServer with SD Card backend for esp8266
-
-   Copyright (c) 2015 Hristo Gochkov. All rights reserved.
-   This file is part of the WebServer library for Arduino environment.
+   Sagitta gauge ESP32 - cheap (C)TD sonde with WiFi WebServer.
+   
+   Thanks Hristo Gochkov for WebServer example.
 
    This library is free software; you can redistribute it and/or
    modify it under the terms of the GNU Lesser General Public
@@ -17,15 +16,6 @@
    You should have received a copy of the GNU Lesser General Public
    License along with this library; if not, write to the Free Software
    Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
-
-   Have a FAT Formatted SD Card connected to the SPI port of the ESP8266
-   The web root is the SD Card root folder
-   File extensions with more than 3 charecters are not supported by the SD Library
-   File Names longer than 8 charecters will be truncated by the SD library, so keep filenames shorter
-   index.htm is the default index (works on subfolders as well)
-
-   upload the contents of SdRoot to the root of the SDcard and access the editor by going to http://esp8266sd.local/edit
-
  */
 #include <WiFi.h>
 #include <WiFiClient.h>
@@ -418,7 +408,7 @@ void handleNotFound() {
         message += server.args();
         message += "\n";
         for (uint8_t i = 0; i < server.args(); i++) {
-                message += " NAME:" + server.argName(i) + "\n VALUE:" + server.arg(i) + "\n\n";
+                message += "\n NAME:" + server.argName(i) + "\n VALUE:" + server.arg(i) + "\n";
         }
         server.send(404, "text/plain", message);
         DBG_OUTPUT_PORT.print(message);
