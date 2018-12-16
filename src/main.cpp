@@ -39,7 +39,7 @@
 #include <pt100rtd.h>
 #include <ADS1115.h>
 #define DBG_OUTPUT_PORT if (debug) Serial
-
+#define DEFAULTFILENAME "datafile.sg"
 struct sensorvalues {
         float temperature;
         float pressure;
@@ -51,7 +51,7 @@ bool debug = true;
 bool measuremode = false;
 long iterate = 0;
 sensorvalues zerovalues {0.0, 0.0, 0, 0};
-String filename = "datafile.sg";
+String filename = DEFAULTFILENAME;
 long unsigned int zeromillis = 0;
 
 ADS1115 adc0(ADS1115_DEFAULT_ADDRESS);
@@ -214,7 +214,6 @@ void printDirectory() {
                 if (cnt > 0) {
                         output = ',';
                 }
-
                 output += "{\"type\":\"";
                 output += (entry.isDirectory()) ? "dir" : "file";
                 output += "\",\"name\":\"";
@@ -388,16 +387,38 @@ void handleNotFound() {
         if (hasSD && loadFromSdCard(server.uri())) {
                 return;
         }
-        String message = "SDCARD Not Detected\n\n";
+        String message = "";
+        if (!hasSD) {
+                message += "SDCARD Not Detected\n";
+        }
         message += "URI: ";
         message += server.uri();
         message += "\nMethod: ";
-        message += (server.method() == HTTP_GET) ? "GET" : "POST";
+        switch (server.method()) {
+        case 0b00000001: message += "HTTP_GET";
+                break;
+        case 0b00000010: message += "HTTP_POST";
+                break;
+        case 0b00000100: message += "HTTP_DELETE";
+                break;
+        case 0b00001000: message += "HTTP_PUT";
+                break;
+        case 0b00010000: message += "HTTP_PATCH";
+                break;
+        case 0b00100000: message += "HTTP_HEAD";
+                break;
+        case 0b01000000: message += "HTTP_OPTIONS";
+                break;
+        case 0b01111111: message += "HTTP_ANY";
+                break;
+        default: message += "UNKNOWN";
+                break;
+        }
         message += "\nArguments: ";
         message += server.args();
         message += "\n";
         for (uint8_t i = 0; i < server.args(); i++) {
-                message += " NAME:" + server.argName(i) + "\n VALUE:" + server.arg(i) + "\n";
+                message += " NAME:" + server.argName(i) + "\n VALUE:" + server.arg(i) + "\n\n";
         }
         server.send(404, "text/plain", message);
         DBG_OUTPUT_PORT.print(message);
@@ -433,8 +454,13 @@ void handleMeasureModeOn(){
         if (server.hasArg("zero")) {
                 handleZero();
         }
+        if (server.hasArg("dir")) {
+                filename = server.arg("dir");
+        } else {
+                filename = DEFAULTFILENAME;
+        }
 
-        DBG_OUTPUT_PORT.println("\nServer args: " + String(server.args()) + " " + server.arg("coordinates") + "  " + server.arg("datetime"));
+        DBG_OUTPUT_PORT.println("\nServer args: " + String(server.args()) + "x");
         deleteRecursive(filename);
         measuremode = true;
         File sensorsdatafile;
@@ -458,7 +484,8 @@ void handleMeasureModeOn(){
 void handleMeasureModeOff(){
         measuremode = false;
         File sensorsdatafile;
-        sensorsdatafile = SD.open(filename.c_str(), FILE_WRITE);//"test.txt", FILE_WRITE);//
+        sensorsdatafile = SD.open(filename.c_str(), FILE_WRITE);
+        delay(10);
         if (sensorsdatafile) {
                 sensorsdatafile.print("\n]\n}\n");
                 sensorsdatafile.flush();
